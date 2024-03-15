@@ -6,4 +6,6 @@ pub struct ForgejoImportConfig {
     pub forgejo_url: Option<String>,
     pub forgejo_token: Option<String>,
     pub github_token: Option<String>,
+    pub migrate_wiki: Option<bool>,
+    pub migrate_lfs: Option<bool>,
 }

@@ -36,6 +36,14 @@ pub async fn apply_config(command: &mut Commands) -> anyhow::Result<()> {
                 if cmd.github_token.is_none() {
                     cmd.github_token = config.github_token;
                 }
+
+                if let Some(migrate_wiki) = config.migrate_wiki {
+                    cmd.migrate_wiki = migrate_wiki;
+                }
+
+                if let Some(migrate_lfs) = config.migrate_lfs {
+                    cmd.migrate_lfs = migrate_lfs;
+                }
             }
             Commands::MirrorUser(cmd) => {
                 if cmd.forgejo_url.is_none() {
@@ -49,6 +57,14 @@ pub async fn apply_config(command: &mut Commands) -> anyhow::Result<()> {
                 if cmd.github_token.is_none() {
                     cmd.github_token = config.github_token;
                 }
+
+                if let Some(migrate_wiki) = config.migrate_wiki {
+                    cmd.migrate_wiki = migrate_wiki;
+                }
+
+                if let Some(migrate_lfs) = config.migrate_lfs {
+                    cmd.migrate_lfs = migrate_lfs;
+                }
             }
             Commands::MirrorRepo(cmd) => {
                 if cmd.forgejo_url.is_none() {
@@ -61,6 +77,14 @@ pub async fn apply_config(command: &mut Commands) -> anyhow::Result<()> {
 
                 if cmd.github_token.is_none() {
                     cmd.github_token = config.github_token;
+                }
+
+                if let Some(migrate_wiki) = config.migrate_wiki {
+                    cmd.migrate_wiki = migrate_wiki;
+                }
+
+                if let Some(migrate_lfs) = config.migrate_lfs {
+                    cmd.migrate_lfs = migrate_lfs;
                 }
             }
             Commands::DeleteOrg(cmd) => {
