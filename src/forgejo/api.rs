@@ -52,8 +52,14 @@ impl ForgejoApi {
 
     pub async fn create_organization(
         &mut self,
-        options: &ForgejoCreateOrganisationRequest,
+        options: &mut ForgejoCreateOrganisationRequest,
     ) -> anyhow::Result<()> {
+        if let Some(website) = &options.website {
+            if !website.starts_with("http://") || !website.starts_with("https://") {
+                options.website = Some(format!("https://{}", website));
+            }
+        }
+
         let req = self
             .client
             .request(

@@ -52,7 +52,7 @@ pub async fn mirror_organisation(cmd: MirrorOrganisationCommand) -> anyhow::Resu
         };
 
         forgejo
-            .create_organization(&ForgejoCreateOrganisationRequest {
+            .create_organization(&mut ForgejoCreateOrganisationRequest {
                 description: Some(format!(
                     "Mirror of {}\n\n{}",
                     gh_org.html_url,
@@ -140,8 +140,8 @@ pub async fn mirror_user(cmd: MirrorUserCommand) -> anyhow::Result<()> {
         };
 
         forgejo
-            .create_organization(&ForgejoCreateOrganisationRequest {
-                description: Some(format!("Mirror of {}", gh_user.html_url,)),
+            .create_organization(&mut ForgejoCreateOrganisationRequest {
+                description: Some(format!("Mirror of {}", gh_user.html_url, )),
                 email: None,
                 full_name,
                 location: None,
