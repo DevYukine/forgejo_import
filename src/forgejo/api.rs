@@ -55,7 +55,10 @@ impl ForgejoApi {
         options: &mut ForgejoCreateOrganisationRequest,
     ) -> anyhow::Result<()> {
         if let Some(website) = &options.website {
-            if !website.starts_with("http://") || !website.starts_with("https://") {
+            let is_prefixed_url = website.starts_with("http://") || website.starts_with("https://");
+            let is_empty = website.is_empty();
+
+            if !is_empty && !is_prefixed_url {
                 options.website = Some(format!("https://{}", website));
             }
         }
