@@ -8,8 +8,10 @@ use errors::ConfigError;
 use crate::cli::Commands;
 use crate::config::constants::{
     CONFIG_FILE_NAME, CONFIG_PATH, HOME_ENV, PROJECT_NAME, WINDOWS_APPDATA_ENV,
-    WINDOWS_HOMEDRIVE_ENV, WINDOWS_HOMEPATH_ENV, WINDOWS_USERPROFILE_ENV, XDG_CONFIG_ENV,
+    XDG_CONFIG_ENV,
 };
+#[cfg(windows)]
+use crate::config::constants::{WINDOWS_HOMEDRIVE_ENV, WINDOWS_HOMEPATH_ENV, WINDOWS_USERPROFILE_ENV};
 use crate::config::models::ForgejoImportConfig;
 
 mod constants;
