@@ -169,7 +169,7 @@ impl ForgejoApi {
                         &self.base_url, API_VERSION, name
                     ))?,
                 )
-                .query(&[("page", index), ("per_page", 25)])
+                .query(&[("page", index), ("limit", 25)])
                 .headers(self.headers.clone())
                 .build()?;
 
