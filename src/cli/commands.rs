@@ -1,4 +1,5 @@
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
+
 use log::{debug, info, warn};
 use regex::Regex;
 
@@ -195,10 +196,9 @@ pub async fn mirror_repository(cmd: MirrorRepositoryCommand) -> anyhow::Result<(
     let mut forgejo = ForgejoApi::new(cmd.forgejo_url.unwrap(), cmd.forgejo_token.unwrap())?;
     let mut github = GithubApi::new(cmd.github_token.clone().unwrap())?;
 
-    lazy_static! {
-        static ref REPO_NAME_REGEX: Regex =
-            Regex::new(r"(?:git@|https://)github.com[:/](?<ownerRepoName>.*)").unwrap();
-    }
+    static REPO_NAME_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?:git@|https://)github.com[:/](?<ownerRepoName>.*)").unwrap()
+    });
 
     let forgejo_repo_owner = cmd.output_owner;
 

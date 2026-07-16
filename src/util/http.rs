@@ -1,12 +1,11 @@
+use std::sync::LazyLock;
+
 use const_format::formatcp;
-use lazy_static::lazy_static;
 use reqwest::Client;
 
 use crate::built_info;
 
-lazy_static! {
-    pub static ref CLIENT: Client = Client::new();
-}
+pub static CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 pub const USER_AGENT: &str = formatcp!(
     "{}/{} ({})",
