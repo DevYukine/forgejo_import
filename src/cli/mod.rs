@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 use crate::forgejo::models::ForgejoVisibility;
 
 pub mod commands;
-pub mod errors;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
