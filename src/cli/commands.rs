@@ -93,7 +93,7 @@ pub async fn mirror_organisation(cmd: MirrorOrganisationCommand) -> anyhow::Resu
         milestones: cmd.migrate_milestones,
         mirror: true,
         mirror_interval: None,
-        private: &cmd.visibility == &ForgejoVisibility::Private,
+        private: cmd.visibility == ForgejoVisibility::Private,
         pull_requests: cmd.migrate_pull_requests,
         releases: cmd.migrate_releases,
         repo_name: "".to_string(),
@@ -142,7 +142,7 @@ pub async fn mirror_user(cmd: MirrorUserCommand) -> anyhow::Result<()> {
 
         forgejo
             .create_organization(&mut ForgejoCreateOrganisationRequest {
-                description: Some(format!("Mirror of {}", gh_user.html_url, )),
+                description: Some(format!("Mirror of {}", gh_user.html_url,)),
                 email: None,
                 full_name,
                 location: None,
@@ -179,7 +179,7 @@ pub async fn mirror_user(cmd: MirrorUserCommand) -> anyhow::Result<()> {
         milestones: cmd.migrate_milestones,
         mirror: true,
         mirror_interval: None,
-        private: &cmd.visibility == &ForgejoVisibility::Private,
+        private: cmd.visibility == ForgejoVisibility::Private,
         pull_requests: cmd.migrate_pull_requests,
         releases: cmd.migrate_releases,
         repo_name: "".to_string(),
@@ -319,7 +319,7 @@ async fn create_migration_if_not_exist(
 
     debug!("Migrating repository: {}", &repo_name);
 
-    forgejo.mirror_repository(&request).await?;
+    forgejo.mirror_repository(request).await?;
 
     info!("Repository mirrored: {}", &repo_name);
 

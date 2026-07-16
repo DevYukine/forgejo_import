@@ -7,11 +7,12 @@ use errors::ConfigError;
 
 use crate::cli::Commands;
 use crate::config::constants::{
-    CONFIG_FILE_NAME, CONFIG_PATH, HOME_ENV, PROJECT_NAME, WINDOWS_APPDATA_ENV,
-    XDG_CONFIG_ENV,
+    CONFIG_FILE_NAME, CONFIG_PATH, HOME_ENV, PROJECT_NAME, WINDOWS_APPDATA_ENV, XDG_CONFIG_ENV,
 };
 #[cfg(windows)]
-use crate::config::constants::{WINDOWS_HOMEDRIVE_ENV, WINDOWS_HOMEPATH_ENV, WINDOWS_USERPROFILE_ENV};
+use crate::config::constants::{
+    WINDOWS_HOMEDRIVE_ENV, WINDOWS_HOMEPATH_ENV, WINDOWS_USERPROFILE_ENV,
+};
 use crate::config::models::ForgejoImportConfig;
 
 mod constants;
@@ -225,7 +226,7 @@ fn search_config_in_default_locations() -> anyhow::Result<Option<PathBuf>> {
 }
 
 fn get_config_path_from_default_location_by_env(env: &str) -> Option<PathBuf> {
-    let env_resolved = env::var(env).unwrap_or(String::new());
+    let env_resolved = env::var(env).unwrap_or_default();
 
     if !env_resolved.is_empty() {
         let env_config_home = PathBuf::from(env_resolved)
@@ -250,8 +251,8 @@ fn get_home_env() -> Option<String> {
         return Some(user_profile);
     }
 
-    let home_drive = env::var(WINDOWS_HOMEDRIVE_ENV).unwrap_or(String::new());
-    let home_path = env::var(WINDOWS_HOMEPATH_ENV).unwrap_or(String::new());
+    let home_drive = env::var(WINDOWS_HOMEDRIVE_ENV).unwrap_or_default();
+    let home_path = env::var(WINDOWS_HOMEPATH_ENV).unwrap_or_default();
 
     if !home_drive.is_empty() && !home_path.is_empty() {
         return Some(format!("{}\\{}", home_drive, home_path));

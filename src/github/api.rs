@@ -1,10 +1,10 @@
 use anyhow::Error;
 use bytes::Bytes;
-use reqwest::{Client, Method, Request, Response};
 use reqwest::header::HeaderMap;
+use reqwest::{Client, Method, Request, Response};
 use serde::de::DeserializeOwned;
-use tower::{Service, ServiceExt};
 use tower::limit::RateLimit;
+use tower::{Service, ServiceExt};
 
 use crate::github::constants::API_URL;
 use crate::github::error::GithubApiError;
@@ -91,7 +91,7 @@ impl GithubApi {
 
             index += 1;
 
-            if res.len() > 0 {
+            if !res.is_empty() {
                 last_response_count = res.len();
 
                 repos.extend(res);
@@ -100,7 +100,7 @@ impl GithubApi {
             }
         }
 
-        repos.sort_by(|a, b| a.size.cmp(&b.size));
+        repos.sort_by_key(|a| a.size);
 
         Ok(repos)
     }
@@ -154,7 +154,7 @@ impl GithubApi {
 
             index += 1;
 
-            if res.len() > 0 {
+            if !res.is_empty() {
                 last_response_count = res.len();
 
                 repos.extend(res);
@@ -163,7 +163,7 @@ impl GithubApi {
             }
         }
 
-        repos.sort_by(|a, b| a.size.cmp(&b.size));
+        repos.sort_by_key(|a| a.size);
 
         Ok(repos)
     }
@@ -197,7 +197,7 @@ impl GithubApi {
 
         let status = res.status();
 
-        return if status.is_success() {
+        if status.is_success() {
             Ok(res)
         } else {
             let response_text = res.text().await?;
@@ -206,7 +206,7 @@ impl GithubApi {
                 status,
                 response_text,
             )))
-        };
+        }
     }
 
     async fn do_request(&mut self, req: Request) -> anyhow::Result<Response> {

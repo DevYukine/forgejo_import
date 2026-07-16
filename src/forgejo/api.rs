@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, Error};
-use base64::{engine::general_purpose, Engine as _};
+use anyhow::{Error, anyhow};
+use base64::{Engine as _, engine::general_purpose};
 use bytes::Bytes;
 use general_purpose::STANDARD;
 use reqwest::header::HeaderMap;
@@ -267,7 +267,7 @@ impl ForgejoApi {
 
         let status = res.status();
 
-        return if status.is_success() {
+        if status.is_success() {
             Ok(res)
         } else {
             let response_text = res.text().await?;
@@ -276,7 +276,7 @@ impl ForgejoApi {
                 status,
                 response_text,
             )))
-        };
+        }
     }
 
     async fn do_request(&mut self, req: Request) -> anyhow::Result<Response> {
