@@ -40,13 +40,8 @@ pub async fn apply_config(command: &mut Commands) -> anyhow::Result<()> {
                     cmd.github_token = config.github_token;
                 }
 
-                if let Some(migrate_wiki) = config.migrate_wiki {
-                    cmd.migrate_wiki = migrate_wiki;
-                }
-
-                if let Some(migrate_lfs) = config.migrate_lfs {
-                    cmd.migrate_lfs = migrate_lfs;
-                }
+                cmd.migrate_wiki |= config.migrate_wiki.unwrap_or(false);
+                cmd.migrate_lfs |= config.migrate_lfs.unwrap_or(false);
             }
             Commands::MirrorUser(cmd) => {
                 if cmd.forgejo_url.is_none() {
@@ -61,13 +56,8 @@ pub async fn apply_config(command: &mut Commands) -> anyhow::Result<()> {
                     cmd.github_token = config.github_token;
                 }
 
-                if let Some(migrate_wiki) = config.migrate_wiki {
-                    cmd.migrate_wiki = migrate_wiki;
-                }
-
-                if let Some(migrate_lfs) = config.migrate_lfs {
-                    cmd.migrate_lfs = migrate_lfs;
-                }
+                cmd.migrate_wiki |= config.migrate_wiki.unwrap_or(false);
+                cmd.migrate_lfs |= config.migrate_lfs.unwrap_or(false);
             }
             Commands::MirrorRepo(cmd) => {
                 if cmd.forgejo_url.is_none() {
@@ -82,13 +72,8 @@ pub async fn apply_config(command: &mut Commands) -> anyhow::Result<()> {
                     cmd.github_token = config.github_token;
                 }
 
-                if let Some(migrate_wiki) = config.migrate_wiki {
-                    cmd.migrate_wiki = migrate_wiki;
-                }
-
-                if let Some(migrate_lfs) = config.migrate_lfs {
-                    cmd.migrate_lfs = migrate_lfs;
-                }
+                cmd.migrate_wiki |= config.migrate_wiki.unwrap_or(false);
+                cmd.migrate_lfs |= config.migrate_lfs.unwrap_or(false);
             }
             Commands::DeleteOrg(cmd) => {
                 if cmd.forgejo_url.is_none() {
