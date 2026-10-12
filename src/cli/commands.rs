@@ -232,7 +232,7 @@ pub async fn mirror_repository(cmd: MirrorRepositoryCommand) -> anyhow::Result<(
                 milestones: cmd.migrate_milestones,
                 mirror: true,
                 mirror_interval: None,
-                private: cmd.private,
+                private: cmd.private || repo.private,
                 pull_requests: cmd.migrate_pull_requests,
                 releases: cmd.migrate_releases,
                 repo_name: repo_name.to_string(),
@@ -291,6 +291,7 @@ async fn create_migrations_if_not_exist(
 
         options.repo_name = repo.name.clone();
         options.clone_addr = repo.clone_url.clone();
+        options.private = default_options.private || repo.private;
         options.description = Some(format!(
             "[MIRROR] {}",
             repo.description.clone().unwrap_or("".to_string())
