@@ -98,6 +98,15 @@ pub async fn delete_organisation(cmd: DeleteOrg, config: &Config) -> Result<()> 
 
     let repos = forgejo.organisation_repositories(org).await?;
 
+    if !cmd.yes
+        && !confirm(&format!(
+            "Delete organisation {org} and all of its {} repositories? This cannot be undone. [y/N] ",
+            repos.len()
+        ))?
+    {
+        bail!("aborted");
+    }
+
     for repo in repos {
         forgejo.delete_repository(org, &repo.name).await?;
         info!("Deleted repository {org}/{}", repo.name);
@@ -107,6 +116,18 @@ pub async fn delete_organisation(cmd: DeleteOrg, config: &Config) -> Result<()> 
     info!("Deleted organisation {org}");
 
     Ok(())
+}
+
+fn confirm(prompt: &str) -> Result<bool> {
+    use std::io::{BufRead, Write};
+
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
 fn github_api(args: GithubArgs, config: &Config) -> Result<GithubApi> {

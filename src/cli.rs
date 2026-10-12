@@ -139,6 +139,10 @@ pub struct DeleteOrg {
     #[command(flatten)]
     pub forgejo: ForgejoArgs,
 
+    /// skip the confirmation prompt
+    #[arg(short, long)]
+    pub yes: bool,
+
     /// the name of the forgejo organisation to delete
     pub forgejo_organisation_name: String,
 }
