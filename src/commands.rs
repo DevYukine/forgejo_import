@@ -10,7 +10,7 @@ use crate::github::{self, GithubApi};
 
 pub async fn mirror_organisation(cmd: MirrorOrg, config: &Config) -> Result<()> {
     let github = github_api(cmd.github, config)?;
-    let forgejo = forgejo_api(cmd.forgejo, config)?;
+    let forgejo = forgejo_api(cmd.forgejo, config).await?;
     let mirror = merge_mirror_args(cmd.mirror, config);
 
     let org = github.organisation(&cmd.github_organisation_name).await?;
@@ -42,7 +42,7 @@ pub async fn mirror_organisation(cmd: MirrorOrg, config: &Config) -> Result<()> 
 
 pub async fn mirror_user(cmd: MirrorUser, config: &Config) -> Result<()> {
     let github = github_api(cmd.github, config)?;
-    let forgejo = forgejo_api(cmd.forgejo, config)?;
+    let forgejo = forgejo_api(cmd.forgejo, config).await?;
     let mirror = merge_mirror_args(cmd.mirror, config);
 
     let user = github.user(&cmd.github_user_name).await?;
@@ -72,7 +72,7 @@ pub async fn mirror_user(cmd: MirrorUser, config: &Config) -> Result<()> {
 
 pub async fn mirror_repository(cmd: MirrorRepo, config: &Config) -> Result<()> {
     let github = github_api(cmd.github, config)?;
-    let forgejo = forgejo_api(cmd.forgejo, config)?;
+    let forgejo = forgejo_api(cmd.forgejo, config).await?;
     let mirror = merge_mirror_args(cmd.mirror, config);
 
     let (owner, name) = parse_github_repository(&cmd.github_repository_url)?;
@@ -93,7 +93,7 @@ pub async fn mirror_repository(cmd: MirrorRepo, config: &Config) -> Result<()> {
 }
 
 pub async fn delete_organisation(cmd: DeleteOrg, config: &Config) -> Result<()> {
-    let forgejo = forgejo_api(cmd.forgejo, config)?;
+    let forgejo = forgejo_api(cmd.forgejo, config).await?;
     let org = &cmd.forgejo_organisation_name;
 
     let repos = forgejo.organisation_repositories(org).await?;
@@ -118,7 +118,7 @@ fn github_api(args: GithubArgs, config: &Config) -> Result<GithubApi> {
     GithubApi::new(token)
 }
 
-fn forgejo_api(args: ForgejoArgs, config: &Config) -> Result<ForgejoApi> {
+async fn forgejo_api(args: ForgejoArgs, config: &Config) -> Result<ForgejoApi> {
     let url = args
         .forgejo_url
         .or_else(|| config.forgejo_url.clone())
@@ -128,7 +128,7 @@ fn forgejo_api(args: ForgejoArgs, config: &Config) -> Result<ForgejoApi> {
         .or_else(|| config.forgejo_token.clone())
         .context("missing --forgejo-token (cli) or forgejoToken (config file)")?;
 
-    ForgejoApi::new(&url, token)
+    ForgejoApi::connect(&url, token).await
 }
 
 /// CLI flags win; the config file can only switch a migration on, never off.
@@ -173,9 +173,16 @@ async fn ensure_organisation(
     info!("Created organisation {username}");
 
     // The organisation is usable without an avatar, and a rerun would skip this block anyway.
-    match set_avatar(forgejo, github, username, org.avatar_url).await {
-        Ok(()) => info!("Set avatar of organisation {username}"),
-        Err(err) => warn!("Could not set avatar of organisation {username}: {err:#}"),
+    if !forgejo.supports_organisation_avatar() {
+        warn!(
+            "Forgejo {} cannot set organisation avatars through the API (needs Gitea API 1.21), skipping",
+            forgejo.version()
+        );
+    } else {
+        match set_avatar(forgejo, github, username, org.avatar_url).await {
+            Ok(()) => info!("Set avatar of organisation {username}"),
+            Err(err) => warn!("Could not set avatar of organisation {username}: {err:#}"),
+        }
     }
 
     Ok(())
