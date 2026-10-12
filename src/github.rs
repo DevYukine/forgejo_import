@@ -66,10 +66,26 @@ impl GithubApi {
             .await
     }
 
-    /// Public repositories of a user, smallest first.
+    /// Repositories of a user, smallest first. `GET /users/{user}/repos` only lists public ones,
+    /// so when the token belongs to that user the private repositories come from `GET /user/repos`.
     pub async fn user_repositories(&self, user: &str) -> Result<Vec<Repository>> {
-        self.repositories(&["users", user, "repos"], &[("per_page", PAGE_SIZE)])
+        if self.authenticated_login().await?.eq_ignore_ascii_case(user) {
+            self.repositories(
+                &["user", "repos"],
+                &[("affiliation", "owner"), ("per_page", PAGE_SIZE)],
+            )
             .await
+        } else {
+            self.repositories(&["users", user, "repos"], &[("per_page", PAGE_SIZE)])
+                .await
+        }
+    }
+
+    /// Login of the account the token belongs to.
+    pub async fn authenticated_login(&self) -> Result<String> {
+        let account: Account = self.rest.get(&["user"]).await?;
+
+        Ok(account.login)
     }
 
     async fn repositories(&self, path: &[&str], query: &[(&str, &str)]) -> Result<Vec<Repository>> {

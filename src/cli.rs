@@ -14,7 +14,7 @@ pub enum Command {
     /// Mirror a github organisation, including all repositories you have access to, to forgejo
     MirrorOrg(MirrorOrg),
 
-    /// Mirror a github user, including all repositories you have access to, to forgejo
+    /// Mirror a github user to forgejo, including private repositories when the token belongs to that user
     MirrorUser(MirrorUser),
 
     /// Mirror a github repository to forgejo
