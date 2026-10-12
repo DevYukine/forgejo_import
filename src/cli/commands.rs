@@ -153,17 +153,15 @@ pub async fn mirror_user(cmd: MirrorUserCommand) -> anyhow::Result<()> {
             })
             .await?;
 
-        info!("Created organisation: {}", &gh_user.login);
+        info!("Created organisation: {}", &owner);
 
         let avatar_bytes = github.get_user_avatar(&gh_user.login).await?;
 
-        debug!("Setting avatar for organisation: {}", &gh_user.login);
+        debug!("Setting avatar for organisation: {}", &owner);
 
-        forgejo
-            .set_organisation_avatar(&gh_user.login, avatar_bytes)
-            .await?;
+        forgejo.set_organisation_avatar(&owner, avatar_bytes).await?;
 
-        info!("Updated avatar for organisation: {}", &gh_user.login);
+        info!("Updated avatar for organisation: {}", &owner);
     }
 
     let repos = github.get_repositories_of_user(&gh_user.login).await?;
