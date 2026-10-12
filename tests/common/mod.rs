@@ -96,7 +96,10 @@ pub fn no_forgejo_args() -> ForgejoArgs {
 }
 
 pub fn no_github_args() -> GithubArgs {
-    GithubArgs { github_token: None }
+    GithubArgs {
+        github_token: None,
+        github_api_url: None,
+    }
 }
 
 pub fn no_mirror_args() -> MirrorArgs {

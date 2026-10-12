@@ -10,15 +10,22 @@ use serde::de::DeserializeOwned;
 
 const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Generous because Forgejo deletes repositories synchronously.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Forgejo deletes repositories synchronously, which is slow for big ones.
+const DELETE_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_REDIRECTS: usize = 10;
 /// Enough of an error body for an API message, not a whole HTML page.
 const ERROR_BODY_LIMIT: usize = 1024;
 
 /// Thin token-authenticated JSON client bound to one API base URL.
+///
+/// GET requests follow redirects within the same origin (renamed GitHub repositories answer
+/// with 301). Everything else never follows one: a POST or DELETE that lands on a renamed
+/// Forgejo organisation must fail instead of silently acting on a different target, and an
+/// existence probe must not report a redirected name as present.
 pub struct RestClient {
-    client: Client,
+    following: Client,
+    strict: Client,
     base: Url,
     token: String,
     service: &'static str,
@@ -26,22 +33,20 @@ pub struct RestClient {
 
 impl RestClient {
     pub fn new(service: &'static str, base: Url, token: String) -> Result<Self> {
-        if base.cannot_be_a_base() {
-            bail!("{service} url needs a scheme and a host: {base}");
+        if !matches!(base.scheme(), "http" | "https") || base.host_str().is_none() {
+            bail!("{service} url needs an http(s) scheme and a host: {base}");
         }
 
         if base.scheme() == "http" {
             warn!("{service} url uses plain http, the token is sent unencrypted");
         }
 
-        let client = Client::builder()
-            .user_agent(USER_AGENT)
-            .connect_timeout(CONNECT_TIMEOUT)
-            .redirect(same_origin_redirects())
-            .build()?;
+        let following = client(same_origin_redirects())?;
+        let strict = client(redirect::Policy::none())?;
 
         Ok(Self {
-            client,
+            following,
+            strict,
             base,
             token,
             service,
@@ -56,6 +61,21 @@ impl RestClient {
     /// Segments are percent-encoded; `.` and `..` are refused because the url crate would
     /// collapse them and silently target another endpoint.
     pub fn request(&self, method: Method, path: &[&str]) -> Result<RequestBuilder> {
+        let client = if method == Method::GET {
+            &self.following
+        } else {
+            &self.strict
+        };
+
+        self.request_with(client, method, path)
+    }
+
+    fn request_with(
+        &self,
+        client: &Client,
+        method: Method,
+        path: &[&str],
+    ) -> Result<RequestBuilder> {
         if let Some(segment) = path.iter().find(|s| matches!(**s, "" | "." | "..")) {
             bail!("invalid name {segment:?}");
         }
@@ -66,8 +86,7 @@ impl RestClient {
             .pop_if_empty()
             .extend(path);
 
-        Ok(self
-            .client
+        Ok(client
             .request(method, url)
             .bearer_auth(&self.token)
             .timeout(REQUEST_TIMEOUT))
@@ -111,8 +130,12 @@ impl RestClient {
         Ok(all)
     }
 
+    /// Probes `path` without following redirects, so a renamed resource does not count as present.
     pub async fn exists(&self, path: &[&str]) -> Result<bool> {
-        let res = self.request(Method::GET, path)?.send().await?;
+        let res = self
+            .request_with(&self.strict, Method::GET, path)?
+            .send()
+            .await?;
 
         if res.status() == StatusCode::NOT_FOUND {
             return Ok(false);
@@ -131,15 +154,16 @@ impl RestClient {
     }
 
     pub async fn delete(&self, path: &[&str]) -> Result<()> {
-        self.send(self.request(Method::DELETE, path)?).await?;
+        self.send(self.request(Method::DELETE, path)?.timeout(DELETE_TIMEOUT))
+            .await?;
 
         Ok(())
     }
 
-    /// Downloads an arbitrary URL without credentials.
+    /// Downloads an arbitrary URL without credentials, following redirects like a browser would.
     pub async fn download(&self, url: &str) -> Result<Bytes> {
         let res = self
-            .send(self.client.get(url).timeout(REQUEST_TIMEOUT))
+            .send(client(redirect::Policy::default())?.get(url))
             .await
             .with_context(|| format!("downloading {url}"))?;
 
@@ -150,7 +174,7 @@ impl RestClient {
         self.check(request.send().await?).await
     }
 
-    async fn check(&self, res: Response) -> Result<Response> {
+    pub async fn check(&self, res: Response) -> Result<Response> {
         let status = res.status();
 
         if status.is_success() {
@@ -178,8 +202,17 @@ impl RestClient {
     }
 }
 
-/// Follows redirects only within the origin the request went to, so neither the bearer token
-/// nor a request body (the migrate call carries the GitHub token) can be replayed to another host.
+fn client(policy: redirect::Policy) -> Result<Client> {
+    Ok(Client::builder()
+        .user_agent(USER_AGENT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(policy)
+        .build()?)
+}
+
+/// Follows redirects only within the origin the request went to, so the bearer token is never
+/// replayed to another host.
 fn same_origin_redirects() -> redirect::Policy {
     redirect::Policy::custom(|attempt| {
         let previous = attempt.previous();

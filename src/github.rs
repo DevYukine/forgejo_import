@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bytes::Bytes;
 use log::warn;
-use reqwest::Url;
+use reqwest::{Method, StatusCode, Url};
 use serde::Deserialize;
 
 use crate::http::RestClient;
@@ -31,6 +31,7 @@ pub struct Repository {
 
 pub struct GithubApi {
     rest: RestClient,
+    web_host: String,
 }
 
 impl GithubApi {
@@ -40,13 +41,25 @@ impl GithubApi {
 
     /// `base` is the REST API root, e.g. `https://ghe.example.com/api/v3` for GitHub Enterprise Server.
     pub fn with_base_url(base: Url, token: String) -> Result<Self> {
+        let web_host = match base.host_str() {
+            Some("api.github.com") => "github.com".to_string(),
+            Some(host) => host.to_string(),
+            None => String::new(),
+        };
+
         Ok(Self {
             rest: RestClient::new("GitHub", base, token)?,
+            web_host,
         })
     }
 
     pub fn token(&self) -> &str {
         self.rest.token()
+    }
+
+    /// Host that repository URLs for this API are expected to use.
+    pub fn web_host(&self) -> &str {
+        &self.web_host
     }
 
     pub async fn organisation(&self, org: &str) -> Result<Account> {
@@ -70,11 +83,11 @@ impl GithubApi {
     /// Repositories of a user, smallest first. `GET /users/{user}/repos` only lists public ones,
     /// so when the token belongs to that user the private repositories come from `GET /user/repos`.
     pub async fn user_repositories(&self, user: &str) -> Result<Vec<Repository>> {
-        let owns_token = match self.rest.get::<Account>(&["user"]).await {
-            Ok(account) => account.login.eq_ignore_ascii_case(user),
-            Err(err) => {
+        let owns_token = match self.authenticated_login().await? {
+            Some(login) => login.eq_ignore_ascii_case(user),
+            None => {
                 warn!(
-                    "Cannot tell whom the GitHub token belongs to, listing only public repositories: {err:#}"
+                    "The GitHub token cannot identify its owner, listing only public repositories of {user}"
                 );
                 false
             }
@@ -90,6 +103,23 @@ impl GithubApi {
             self.repositories(&["users", user, "repos"], &[("per_page", PAGE_SIZE)])
                 .await
         }
+    }
+
+    /// Login the token belongs to, or `None` when the token is not allowed to ask (GitHub App
+    /// installation tokens answer 401/403 on `GET /user`).
+    async fn authenticated_login(&self) -> Result<Option<String>> {
+        let res = self.rest.request(Method::GET, &["user"])?.send().await?;
+
+        if matches!(
+            res.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+        ) {
+            return Ok(None);
+        }
+
+        let account: Account = self.rest.check(res).await?.json().await?;
+
+        Ok(Some(account.login))
     }
 
     async fn repositories(&self, path: &[&str], query: &[(&str, &str)]) -> Result<Vec<Repository>> {

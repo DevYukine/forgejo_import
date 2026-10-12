@@ -13,7 +13,7 @@ fn file(contents: &str) -> NamedTempFile {
 #[test]
 fn parses_camel_case_keys_and_leaves_the_rest_unset() {
     let file = file(
-        r#"{ "forgejoUrl": "https://forgejo.example", "githubToken": "gh", "migrateWiki": true }"#,
+        r#"{ "forgejoUrl": "https://forgejo.example", "githubToken": "gh", "githubApiUrl": "https://ghe.example/api/v3", "migrateWiki": true }"#,
     );
 
     let config = Config::load_from(file.path()).unwrap();
@@ -24,7 +24,10 @@ fn parses_camel_case_keys_and_leaves_the_rest_unset() {
     );
     assert_eq!(config.forgejo_token, None);
     assert_eq!(config.github_token.as_deref(), Some("gh"));
-    assert_eq!(config.github_api_url, None);
+    assert_eq!(
+        config.github_api_url.as_deref(),
+        Some("https://ghe.example/api/v3")
+    );
     assert_eq!(config.migrate_wiki, Some(true));
     assert_eq!(config.migrate_lfs, None);
 }

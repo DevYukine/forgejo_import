@@ -88,8 +88,8 @@ pub async fn mirror_user(cmd: MirrorUser, config: &Config) -> Result<()> {
 }
 
 pub async fn mirror_repository(cmd: MirrorRepo, config: &Config) -> Result<()> {
-    let (owner, name) = parse_repository_url(&cmd.github_repository_url)?;
     let github = github_api(cmd.github, config)?;
+    let (owner, name) = parse_repository_url(&cmd.github_repository_url, github.web_host())?;
     let forgejo = forgejo_api(cmd.forgejo, config).await?;
     let mirror = merge_mirror_args(cmd.mirror, config);
 
@@ -139,13 +139,14 @@ fn confirm(prompt: &str) -> Result<bool> {
     use std::io::{BufRead, IsTerminal, Write};
 
     let stdin = std::io::stdin();
+    let mut stderr = std::io::stderr();
 
-    if !stdin.is_terminal() {
-        bail!("stdin is not a terminal, pass --yes to confirm");
+    if !stdin.is_terminal() || !stderr.is_terminal() {
+        bail!("not running in a terminal, pass --yes to confirm");
     }
 
     eprint!("{prompt}");
-    std::io::stderr().flush()?;
+    stderr.flush()?;
 
     let mut answer = String::new();
     stdin.lock().read_line(&mut answer)?;
@@ -165,9 +166,12 @@ fn github_api(args: GithubArgs, config: &Config) -> Result<GithubApi> {
         .or_else(|| config.github_token.clone())
         .context("missing --github-token (cli) or githubToken (config file)")?;
 
-    match &config.github_api_url {
+    match args
+        .github_api_url
+        .or_else(|| config.github_api_url.clone())
+    {
         Some(url) => GithubApi::with_base_url(
-            Url::parse(url).with_context(|| format!("invalid githubApiUrl: {url}"))?,
+            Url::parse(&url).with_context(|| format!("invalid github api url: {url}"))?,
             token,
         ),
         None => GithubApi::new(token),
@@ -354,18 +358,35 @@ async fn mirror_one(forgejo: &ForgejoApi, request: &forgejo::MigrateRepository) 
 
 /// Extracts `(owner, repo)` from a repository URL as copied from a browser or a clone dialog:
 /// `https://host/owner/repo[.git][/tree/main][?…][#…]`, `git@host:owner/repo[.git]` or
-/// `ssh://git@host/owner/repo`. The host is not checked; the configured API decides what exists.
-fn parse_repository_url(url: &str) -> Result<(&str, &str)> {
+/// `ssh://git@host/owner/repo`. The host must be `expected_host` (`www.` is tolerated) so a
+/// URL from another forge is not silently looked up on the configured GitHub API.
+fn parse_repository_url<'a>(url: &'a str, expected_host: &str) -> Result<(&'a str, &'a str)> {
+    let url = url.trim();
     let without_query = url.split(['?', '#']).next().unwrap_or_default();
-    let path = match without_query.split_once("://") {
-        Some((_, rest)) => rest.split_once('/').map(|(_, path)| path),
-        None => without_query.split_once(':').map(|(_, path)| path),
+    let (authority, path) = match without_query.split_once("://") {
+        Some((_, rest)) => rest.split_once('/'),
+        None => without_query
+            .split_once(':')
+            .filter(|(user_host, _)| user_host.contains('@') && !user_host.contains('/')),
     }
     .with_context(|| format!("unsupported repository url: {url}"))?;
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host)
+        .split(':')
+        .next()
+        .unwrap_or_default();
+
+    if host != expected_host && host.strip_prefix("www.") != Some(expected_host) {
+        bail!(
+            "repository url host {host:?} does not belong to the configured github api ({expected_host}): {url}"
+        );
+    }
+
     let mut segments = path.split('/').filter(|segment| !segment.is_empty());
 
     match (segments.next(), segments.next()) {
-        (Some(owner), Some(repo)) => Ok((owner, repo.trim_end_matches(".git"))),
+        (Some(owner), Some(repo)) => Ok((owner, repo.strip_suffix(".git").unwrap_or(repo))),
         _ => bail!("repository url must contain owner/repository: {url}"),
     }
 }
@@ -390,32 +411,47 @@ mod tests {
             "https://github.com/octo/repo",
             "https://github.com/octo/repo.git",
             "https://github.com/octo/repo/",
+            "  https://github.com/octo/repo \n",
             "http://github.com:8080/octo/repo",
             "https://www.github.com/octo/repo",
+            "https://user:pw@github.com/octo/repo",
             "https://github.com/octo/repo/tree/main/src",
             "https://github.com/octo/repo?tab=readme#section",
             "git@github.com:octo/repo.git",
             "ssh://git@github.com/octo/repo",
-            "https://ghe.example.com/octo/repo",
+            "ssh://git@github.com:22/octo/repo.git",
         ] {
             assert_eq!(
-                parse_repository_url(url).unwrap(),
+                parse_repository_url(url, "github.com").unwrap(),
                 ("octo", "repo"),
                 "{url}"
             );
         }
+
+        assert_eq!(
+            parse_repository_url("https://ghe.example.com/octo/repo", "ghe.example.com").unwrap(),
+            ("octo", "repo")
+        );
+        assert_eq!(
+            parse_repository_url("https://github.com/octo/repo.git.git", "github.com").unwrap(),
+            ("octo", "repo.git")
+        );
     }
 
     #[test]
-    fn rejects_urls_without_owner_and_repository() {
+    fn rejects_other_hosts_and_urls_without_owner_and_repository() {
         for url in [
             "https://github.com/octo",
             "https://github.com//repo",
             "https://github.com",
+            "https://gitlab.com/octo/repo",
+            "https://ghe.example.com/octo/repo",
+            "https:/github.com/octo/repo",
+            "github.com:octo/repo",
             "octo/repo",
             "",
         ] {
-            assert!(parse_repository_url(url).is_err(), "{url}");
+            assert!(parse_repository_url(url, "github.com").is_err(), "{url}");
         }
     }
 

@@ -42,6 +42,10 @@ pub struct GithubArgs {
     /// the github token to use for obtaining information from the github api
     #[arg(long)]
     pub github_token: Option<String>,
+
+    /// the github rest api root, e.g. https://ghe.example.com/api/v3 for github enterprise server
+    #[arg(long)]
+    pub github_api_url: Option<String>,
 }
 
 /// What to migrate besides the git data. Forgejo mirrors cannot carry issues, labels, pull

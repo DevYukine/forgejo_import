@@ -18,7 +18,10 @@ async fn requests_carry_the_bearer_token_and_parse_accounts() {
     Mock::given(method("GET"))
         .and(path("/orgs/octo-org"))
         .and(header("authorization", "Bearer gh-token"))
-        .and(header("user-agent", "forgejo_import/0.1.0"))
+        .and(header(
+            "user-agent",
+            concat!("forgejo_import/", env!("CARGO_PKG_VERSION")),
+        ))
         .respond_with(ok(fixture("github/org.json", &server)))
         .expect(1)
         .mount(&server)
@@ -28,7 +31,7 @@ async fn requests_carry_the_bearer_token_and_parse_accounts() {
 
     assert_eq!(org.login, "octo-org");
     assert_eq!(org.name.as_deref(), Some("Octo Org"));
-    assert_eq!(org.description.as_deref(), Some("An org"));
+    assert_eq!(org.description.as_deref(), Some(""));
     assert_eq!(org.blog.as_deref(), Some("octo.example"));
     assert_eq!(org.html_url, "https://github.com/octo-org");
     assert_eq!(
@@ -73,7 +76,7 @@ async fn organisation_repositories_follow_pages_and_sort_by_size() {
     let names: Vec<&str> = repos.iter().map(|repo| repo.name.as_str()).collect();
     assert_eq!(names, ["empty", "beta", "alpha"]);
     assert!(repos[1].private, "beta is private on GitHub");
-    assert_eq!(repos[0].description.as_deref(), Some("Never pushed to"));
+    assert_eq!(repos[0].description.as_deref(), Some(""));
     assert_eq!(repos[2].clone_url, "https://github.com/octo-org/alpha.git");
 
     let page_sizes: Vec<_> = requests(&server)
@@ -300,32 +303,102 @@ async fn names_that_would_change_the_endpoint_are_rejected() {
 }
 
 #[tokio::test]
-async fn long_error_bodies_are_truncated() {
+async fn long_error_bodies_are_truncated_on_a_char_boundary() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/orgs/broken"))
-        .respond_with(ResponseTemplate::new(502).set_body_string("<html>".repeat(1000)))
+        .respond_with(ResponseTemplate::new(502).set_body_string("ä".repeat(1000)))
         .mount(&server)
         .await;
 
     let err = api(&server).await.organisation("broken").await.unwrap_err();
 
     let message = err.to_string();
-    assert!(message.len() < 1200, "{}", message.len());
-    assert!(message.ends_with('…'), "{message}");
+    let body = message.split_once(": ").unwrap().1;
+    assert_eq!(body.chars().filter(|c| *c == 'ä').count(), 512);
+    assert!(body.ends_with('…'), "{message}");
 }
 
 #[tokio::test]
-async fn base_urls_without_a_host_are_rejected() {
-    let err = GithubApi::with_base_url(
-        Url::parse("ghe.example.com:443/api/v3").unwrap(),
-        "t".to_string(),
-    )
-    .err()
-    .expect("cannot-be-a-base url must be rejected");
+async fn base_urls_without_host_or_http_scheme_are_rejected() {
+    for url in ["ghe.example.com:443/api/v3", "file:///api/v3"] {
+        let err = GithubApi::with_base_url(Url::parse(url).unwrap(), "t".to_string())
+            .err()
+            .unwrap_or_else(|| panic!("{url} must be rejected"));
 
+        assert!(
+            err.to_string()
+                .contains("needs an http(s) scheme and a host"),
+            "{url}: {err}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn user_repositories_propagate_unexpected_failures_of_the_identity_check() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(502))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/octocat/repos"))
+        .respond_with(ok(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let err = api(&server)
+        .await
+        .user_repositories("octocat")
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("502"), "{err}");
+}
+
+#[tokio::test]
+async fn redirect_loops_stop_after_ten_hops() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/loop"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/orgs/loop"))
+        .mount(&server)
+        .await;
+
+    let err = api(&server).await.organisation("loop").await.unwrap_err();
+
+    assert!(format!("{err:#}").contains("too many redirects"), "{err:#}");
+    assert_eq!(requests(&server).await.len(), 11);
+}
+
+#[tokio::test]
+async fn avatar_downloads_follow_cross_origin_redirects() {
+    let server = MockServer::start().await;
+    let cdn = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/avatars/u/1"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("location", format!("{}/img.png", cdn.uri())),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    mount_avatar(&cdn, "/img.png").await;
+
+    let bytes = api(&server)
+        .await
+        .avatar(&format!("{}/avatars/u/1", server.uri()))
+        .await
+        .unwrap();
+
+    assert_eq!(bytes.as_ref(), AVATAR_BYTES);
     assert!(
-        err.to_string().contains("needs a scheme and a host"),
-        "{err}"
+        requests(&cdn).await[0]
+            .headers
+            .get("authorization")
+            .is_none()
     );
 }

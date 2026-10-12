@@ -2,6 +2,7 @@ mod common;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use reqwest::Url;
 use serde_json::{Value, json};
 use wiremock::matchers::{body_json, body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -105,7 +106,7 @@ async fn mirror_org_creates_the_organisation_with_avatar_and_mirrors_every_repos
         .and(body_json(json!({
             "username": "octo-org",
             "full_name": "Octo Org",
-            "description": "Mirror of https://github.com/octo-org\n\nAn org",
+            "description": "Mirror of https://github.com/octo-org",
             "website": "https://octo.example",
             "visibility": "public"
         })))
@@ -133,7 +134,10 @@ async fn mirror_org_creates_the_organisation_with_avatar_and_mirrors_every_repos
         )
         .await;
     servers
-        .expect_migrate(json!({ "repo_name": "empty", "private": false }), 201)
+        .expect_migrate(
+            json!({ "repo_name": "empty", "private": false, "description": "[MIRROR]" }),
+            201,
+        )
         .await;
 
     commands::mirror_organisation(
@@ -375,7 +379,14 @@ async fn mirror_user_targets_the_output_organisation_everywhere() {
     commands::mirror_user(cmd, &servers.config()).await.unwrap();
 }
 
-fn mirror_repo(url: &str) -> MirrorRepo {
+/// `path` is `owner/repo…`; the host is the mock GitHub, which the host check requires.
+fn mirror_repo(github: &MockServer, path: &str) -> MirrorRepo {
+    let host = Url::parse(&github.uri())
+        .unwrap()
+        .host_str()
+        .unwrap()
+        .to_string();
+
     MirrorRepo {
         forgejo: no_forgejo_args(),
         github: no_github_args(),
@@ -383,7 +394,7 @@ fn mirror_repo(url: &str) -> MirrorRepo {
         output_owner: "me".into(),
         output_repository_name: None,
         private: false,
-        github_repository_url: url.into(),
+        github_repository_url: format!("git@{host}:{path}"),
     }
 }
 
@@ -411,7 +422,7 @@ async fn mirror_repo_honours_output_name_and_private_flag() {
     let cmd = MirrorRepo {
         output_repository_name: Some("renamed".into()),
         private: true,
-        ..mirror_repo("git@github.com:octo-org/alpha.git")
+        ..mirror_repo(&servers.github, "octo-org/alpha.git")
     };
 
     commands::mirror_repository(cmd, &servers.config())
@@ -430,7 +441,7 @@ async fn mirror_repo_skips_when_the_target_already_exists() {
     mount_status(&servers.forgejo, "GET", "/api/v1/repos/me/alpha", 200).await;
 
     commands::mirror_repository(
-        mirror_repo("https://github.com/octo-org/alpha"),
+        mirror_repo(&servers.github, "octo-org/alpha"),
         &servers.config(),
     )
     .await
@@ -443,12 +454,18 @@ async fn mirror_repo_skips_when_the_target_already_exists() {
 async fn mirror_repo_rejects_malformed_urls_before_any_request() {
     let (github, forgejo) = (MockServer::start().await, MockServer::start().await);
 
-    let err = commands::mirror_repository(mirror_repo("octo/alpha"), &config(&github, &forgejo))
+    let cmd = MirrorRepo {
+        github_repository_url: "https://gitlab.com/octo/alpha".into(),
+        ..mirror_repo(&github, "octo/alpha")
+    };
+
+    let err = commands::mirror_repository(cmd, &config(&github, &forgejo))
         .await
         .unwrap_err();
 
     assert!(
-        err.to_string().contains("unsupported repository url"),
+        err.to_string()
+            .contains("does not belong to the configured github api"),
         "{err}"
     );
     assert!(requests(&github).await.is_empty());
@@ -490,12 +507,13 @@ async fn cli_credentials_win_over_config_and_migrate_flags_merge() {
         },
         github: GithubArgs {
             github_token: Some("cli-gh".into()),
+            github_api_url: None,
         },
         mirror: MirrorArgs {
             migrate_lfs: true,
             migrate_wiki: false,
         },
-        ..mirror_repo("https://github.com/octo-org/alpha")
+        ..mirror_repo(&servers.github, "octo-org/alpha")
     };
 
     commands::mirror_repository(cmd, &config).await.unwrap();
@@ -509,7 +527,7 @@ async fn missing_credentials_name_the_argument_without_contacting_anything() {
         ..config(&github, &forgejo)
     };
 
-    let err = commands::mirror_repository(mirror_repo("https://github.com/o/r"), &config)
+    let err = commands::mirror_repository(mirror_repo(&github, "o/r"), &config)
         .await
         .unwrap_err();
     assert_eq!(

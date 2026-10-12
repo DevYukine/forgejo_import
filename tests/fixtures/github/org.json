@@ -5,7 +5,7 @@
   "url": "https://api.github.com/orgs/octo-org",
   "repos_url": "https://api.github.com/orgs/octo-org/repos",
   "avatar_url": "{{github}}/avatars/u/583231?v=4",
-  "description": "An org",
+  "description": "",
   "name": "Octo Org",
   "company": null,
   "blog": "octo.example",

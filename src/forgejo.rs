@@ -60,7 +60,7 @@ struct Avatar {
     image: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct VersionResponse {
     version: String,
 }

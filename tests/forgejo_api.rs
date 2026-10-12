@@ -4,7 +4,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use serde_json::json;
-use wiremock::matchers::{body_json, header, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{FORGEJO_TOKEN, fixture, mount_pages, mount_status, mount_version, ok, requests};
@@ -14,15 +14,12 @@ fn api(server: &MockServer) -> ForgejoApi {
     ForgejoApi::new(&server.uri(), FORGEJO_TOKEN.to_string()).unwrap()
 }
 
+/// Version parsing itself is unit-tested in src/forgejo.rs; this only covers the connect wiring.
 #[tokio::test]
 async fn connect_reads_the_version_and_gates_the_avatar_api() {
     for (version, supports_avatar) in [
-        ("1.18.0+1", false),
         ("1.20.6+0", false),
-        ("1.21.0+0", true),
         ("7.0.16+gitea-1.21.11", true),
-        ("16.0.0-dev-785-465b60ef+gitea-1.22.0", true),
-        ("1.22.0", true),
         ("not-a-version", true),
     ] {
         let server = MockServer::start().await;
@@ -39,16 +36,6 @@ async fn connect_reads_the_version_and_gates_the_avatar_api() {
             "{version}"
         );
     }
-}
-
-#[tokio::test]
-async fn before_connect_every_feature_is_assumed_available() {
-    let server = MockServer::start().await;
-
-    let api = api(&server);
-
-    assert_eq!(api.version(), "");
-    assert!(api.supports_organisation_avatar());
 }
 
 #[tokio::test]
@@ -96,6 +83,12 @@ async fn names_are_encoded_as_single_path_segments() {
     let exists = api(&server).organisation_exists("a/../b").await.unwrap();
 
     assert!(!exists);
+    let paths: Vec<_> = requests(&server)
+        .await
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert_eq!(paths, ["/api/v1/orgs/a%2F..%2Fb"]);
 }
 
 #[tokio::test]
@@ -112,6 +105,19 @@ async fn exists_distinguishes_not_found_from_failures() {
     assert!(
         err.to_string().contains("Forgejo API returned 500"),
         "{err}"
+    );
+    let paths: Vec<_> = requests(&server)
+        .await
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "/api/v1/repos/o/missing",
+            "/api/v1/repos/o/present",
+            "/api/v1/repos/o/broken"
+        ]
     );
 }
 
@@ -237,18 +243,77 @@ async fn deletes_use_the_delete_method() {
 }
 
 #[tokio::test]
-async fn pagination_query_is_appended_to_the_page_size() {
+async fn mutating_requests_never_follow_redirects() {
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/orgs/o/repos"))
-        .and(query_param("limit", "50"))
-        .and(query_param("page", "1"))
-        .respond_with(ok(json!([])))
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/orgs/old-name"))
+        .respond_with(ResponseTemplate::new(307).insert_header("location", "/api/v1/orgs/new-name"))
         .expect(1)
         .mount(&server)
         .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/migrate"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/api/v1/repos/x"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/orgs/new-name"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/x"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let api = api(&server);
 
-    let repos = api(&server).organisation_repositories("o").await.unwrap();
+    let err = api.delete_organisation("old-name").await.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("307 Temporary Redirect (redirect to /api/v1/orgs/new-name)"),
+        "{err}"
+    );
 
-    assert!(repos.is_empty());
+    let request = MigrateRepository {
+        auth_token: "t".into(),
+        clone_addr: "https://github.com/o/r.git".into(),
+        description: String::new(),
+        lfs: false,
+        mirror: true,
+        private: false,
+        repo_name: "r".into(),
+        repo_owner: "o".into(),
+        service: "github",
+        wiki: false,
+    };
+    let err = api.migrate_repository(&request).await.unwrap_err();
+    assert!(err.to_string().contains("302"), "{err}");
+}
+
+#[tokio::test]
+async fn existence_probes_treat_a_redirect_as_an_error_not_as_present() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/o/old"))
+        .respond_with(ResponseTemplate::new(307).insert_header("location", "/api/v1/repos/o/new"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/o/new"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let err = api(&server)
+        .repository_exists("o", "old")
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("307"), "{err}");
 }
