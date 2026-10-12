@@ -79,3 +79,7 @@ cargo test
 ## Contributing
 
 Open an issue or a pull request. Commits follow Conventional Commits (`feat(scope): ...`, `fix(scope): ...`).
+
+## License
+
+MIT, see [LICENSE](LICENSE).

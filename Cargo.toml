@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["DevYukine <devyukine@gmx.de>"]
 description = "A cli helping you to import/mirror repositories from external services to forgejo"
+license = "MIT"
 
 [dependencies]
 tokio = { version = "^1", features = ["macros", "rt-multi-thread"] }
