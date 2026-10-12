@@ -13,8 +13,8 @@ use tower::{Service, ServiceExt};
 
 use crate::forgejo::error::ForgejoApiError;
 use crate::forgejo::models::{
-    ForgejoCreateOrganisationRequest, ForgejoGetOrganisationRepositoriesResponse,
-    ForgejoMigrateRepositoryRequest, ForgejoRepository, ForgejoUpdateUserAvatarRequest,
+    ForgejoCreateOrganisationRequest, ForgejoMigrateRepositoryRequest, ForgejoRepository,
+    ForgejoUpdateUserAvatarRequest,
 };
 use crate::util::http::{CLIENT, USER_AGENT};
 
@@ -174,7 +174,7 @@ impl ForgejoApi {
                 .build()?;
 
             let res = self
-                .do_request_handle_status_parsed::<ForgejoGetOrganisationRepositoriesResponse>(req)
+                .do_request_handle_status_parsed::<Vec<ForgejoRepository>>(req)
                 .await?;
 
             index += 1;

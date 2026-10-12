@@ -218,7 +218,7 @@ pub async fn mirror_repository(cmd: MirrorRepositoryCommand) -> anyhow::Result<(
 
             let base_repository_request = ForgejoMigrateRepositoryRequest {
                 auth_token: cmd.github_token.clone().unwrap(),
-                clone_addr: repo.html_url.clone(),
+                clone_addr: repo.clone_url.clone(),
                 description: Some(format!(
                     "[MIRROR] {}",
                     repo.description.clone().unwrap_or("".to_string())

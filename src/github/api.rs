@@ -8,9 +8,7 @@ use tower::{Service, ServiceExt};
 
 use crate::github::constants::API_URL;
 use crate::github::error::GithubApiError;
-use crate::github::models::{
-    GithubOrganisation, GithubOrganisationRepositoryResponse, GithubRepository, GithubUser,
-};
+use crate::github::models::{GithubAccount, GithubRepository};
 use crate::util::http::{CLIENT, USER_AGENT};
 
 pub struct GithubApi {
@@ -39,14 +37,14 @@ impl GithubApi {
         })
     }
 
-    pub async fn get_user(&mut self, user: &str) -> anyhow::Result<GithubUser> {
+    pub async fn get_user(&mut self, user: &str) -> anyhow::Result<GithubAccount> {
         let req = self
             .client
             .request(Method::GET, format!("{}/users/{}", API_URL, user))
             .headers(self.headers.clone())
             .build()?;
 
-        self.do_request_handle_status_parsed::<GithubUser>(req)
+        self.do_request_handle_status_parsed::<GithubAccount>(req)
             .await
     }
 
@@ -105,14 +103,14 @@ impl GithubApi {
         Ok(repos)
     }
 
-    pub async fn get_organisation(&mut self, org: &str) -> anyhow::Result<GithubOrganisation> {
+    pub async fn get_organisation(&mut self, org: &str) -> anyhow::Result<GithubAccount> {
         let req = self
             .client
             .request(Method::GET, format!("{}/orgs/{}", API_URL, org))
             .headers(self.headers.clone())
             .build()?;
 
-        self.do_request_handle_status_parsed::<GithubOrganisation>(req)
+        self.do_request_handle_status_parsed::<GithubAccount>(req)
             .await
     }
 
@@ -149,7 +147,7 @@ impl GithubApi {
                 .build()?;
 
             let res = self
-                .do_request_handle_status_parsed::<GithubOrganisationRepositoryResponse>(req)
+                .do_request_handle_status_parsed::<Vec<GithubRepository>>(req)
                 .await?;
 
             index += 1;
