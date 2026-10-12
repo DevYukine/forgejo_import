@@ -307,7 +307,7 @@ async fn long_error_bodies_are_truncated_on_a_char_boundary() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/orgs/broken"))
-        .respond_with(ResponseTemplate::new(502).set_body_string("ä".repeat(1000)))
+        .respond_with(ResponseTemplate::new(502).set_body_string(format!("x{}", "ä".repeat(1000))))
         .mount(&server)
         .await;
 
@@ -315,7 +315,7 @@ async fn long_error_bodies_are_truncated_on_a_char_boundary() {
 
     let message = err.to_string();
     let body = message.split_once(": ").unwrap().1;
-    assert_eq!(body.chars().filter(|c| *c == 'ä').count(), 512);
+    assert_eq!(body.chars().filter(|c| *c == 'ä').count(), 511);
     assert!(body.ends_with('…'), "{message}");
 }
 

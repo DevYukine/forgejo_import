@@ -66,10 +66,10 @@ The first file found wins, searched in this order: current directory, `%APPDATA%
 ## Development
 
 ```sh
-cargo test
+cargo build --release
 ```
 
-`cargo build` produces the binary; `cargo test` runs the unit tests.
+`cargo test` runs the unit and integration tests; the integration tests talk to local mock servers, no tokens needed.
 
 ## Built with
 
