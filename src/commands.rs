@@ -165,7 +165,13 @@ fn github_api(args: GithubArgs, config: &Config) -> Result<GithubApi> {
         .or_else(|| config.github_token.clone())
         .context("missing --github-token (cli) or githubToken (config file)")?;
 
-    GithubApi::new(token)
+    match &config.github_api_url {
+        Some(url) => GithubApi::with_base_url(
+            Url::parse(url).with_context(|| format!("invalid githubApiUrl: {url}"))?,
+            token,
+        ),
+        None => GithubApi::new(token),
+    }
 }
 
 async fn forgejo_api(args: ForgejoArgs, config: &Config) -> Result<ForgejoApi> {

@@ -15,6 +15,8 @@ pub struct Config {
     pub forgejo_url: Option<String>,
     pub forgejo_token: Option<String>,
     pub github_token: Option<String>,
+    /// Base URL of the GitHub REST API, for GitHub Enterprise Server. Defaults to api.github.com.
+    pub github_api_url: Option<String>,
     pub migrate_wiki: Option<bool>,
     pub migrate_lfs: Option<bool>,
 }

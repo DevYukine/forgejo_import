@@ -57,6 +57,7 @@ Connection details can live in `forgejo_import.config.json` instead of the comma
 | `forgejoUrl` | Point at the Forgejo instance |
 | `forgejoToken` | Authenticate against Forgejo with a token that may create and delete organisations and repositories |
 | `githubToken` | Read from GitHub; Forgejo stores it for mirror syncs, so use a read-only fine-grained token |
+| `githubApiUrl` | Point at a GitHub Enterprise Server API root such as `https://ghe.example.com/api/v3` (default: `https://api.github.com`) |
 | `migrateWiki` | Also mirror wikis |
 | `migrateLfs` | Also mirror LFS objects |
 
