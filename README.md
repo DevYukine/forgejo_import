@@ -55,12 +55,12 @@ Connection details can live in `forgejo_import.config.json` instead of the comma
 | Option | Use it to |
 | --- | --- |
 | `forgejoUrl` | Point at the Forgejo instance |
-| `forgejoToken` | Authenticate against Forgejo (needs organisation and repository write scopes) |
+| `forgejoToken` | Authenticate against Forgejo with a token that may create and delete organisations and repositories |
 | `githubToken` | Read from GitHub; Forgejo stores it for mirror syncs, so use a read-only fine-grained token |
 | `migrateWiki` | Also mirror wikis |
 | `migrateLfs` | Also mirror LFS objects |
 
-The first file found wins, searched in this order: current directory, `%APPDATA%\forgejo_import` (Windows), `$XDG_CONFIG_HOME/forgejo_import`, `~/.config/forgejo_import`, `~`.
+The first file found wins, searched in this order: current directory, `%APPDATA%\forgejo_import` (Windows), `$XDG_CONFIG_HOME/forgejo_import`, `~/.config/forgejo_import`, `~`. Unknown keys are rejected so typos do not pass silently.
 
 ## Development
 

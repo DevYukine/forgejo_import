@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-pub const FILE_NAME: &str = "forgejo_import.config.json";
+const FILE_NAME: &str = "forgejo_import.config.json";
 const PROJECT_DIR: &str = "forgejo_import";
 
 /// Optional defaults for CLI arguments. Keys are camelCase.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
     pub forgejo_url: Option<String>,

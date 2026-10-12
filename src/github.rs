@@ -1,12 +1,12 @@
 use anyhow::Result;
 use bytes::Bytes;
+use log::warn;
 use reqwest::Url;
 use serde::Deserialize;
 
 use crate::http::RestClient;
 
-pub const API_URL: &str = "https://api.github.com";
-
+const API_URL: &str = "https://api.github.com";
 const PAGE_SIZE: &str = "100";
 
 /// Shared shape of `GET /orgs/{org}` and `GET /users/{user}`; fields only one of them returns are optional.
@@ -38,6 +38,7 @@ impl GithubApi {
         Self::with_base_url(Url::parse(API_URL)?, token)
     }
 
+    /// `base` is the REST API root, e.g. `https://ghe.example.com/api/v3` for GitHub Enterprise Server.
     pub fn with_base_url(base: Url, token: String) -> Result<Self> {
         Ok(Self {
             rest: RestClient::new("GitHub", base, token)?,
@@ -69,7 +70,17 @@ impl GithubApi {
     /// Repositories of a user, smallest first. `GET /users/{user}/repos` only lists public ones,
     /// so when the token belongs to that user the private repositories come from `GET /user/repos`.
     pub async fn user_repositories(&self, user: &str) -> Result<Vec<Repository>> {
-        if self.authenticated_login().await?.eq_ignore_ascii_case(user) {
+        let owns_token = match self.rest.get::<Account>(&["user"]).await {
+            Ok(account) => account.login.eq_ignore_ascii_case(user),
+            Err(err) => {
+                warn!(
+                    "Cannot tell whom the GitHub token belongs to, listing only public repositories: {err:#}"
+                );
+                false
+            }
+        };
+
+        if owns_token {
             self.repositories(
                 &["user", "repos"],
                 &[("affiliation", "owner"), ("per_page", PAGE_SIZE)],
@@ -79,13 +90,6 @@ impl GithubApi {
             self.repositories(&["users", user, "repos"], &[("per_page", PAGE_SIZE)])
                 .await
         }
-    }
-
-    /// Login of the account the token belongs to.
-    pub async fn authenticated_login(&self) -> Result<String> {
-        let account: Account = self.rest.get(&["user"]).await?;
-
-        Ok(account.login)
     }
 
     async fn repositories(&self, path: &[&str], query: &[(&str, &str)]) -> Result<Vec<Repository>> {

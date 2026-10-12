@@ -2,14 +2,14 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::forgejo::Visibility;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand)]
 pub enum Command {
     /// Mirror a github organisation, including all repositories you have access to, to forgejo
     MirrorOrg(MirrorOrg),
@@ -25,7 +25,7 @@ pub enum Command {
 }
 
 /// Connection to the Forgejo instance; falls back to the config file when omitted.
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct ForgejoArgs {
     /// the url of the forgejo instance to use
     #[arg(long)]
@@ -37,7 +37,7 @@ pub struct ForgejoArgs {
 }
 
 /// GitHub credentials; fall back to the config file when omitted.
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct GithubArgs {
     /// the github token to use for obtaining information from the github api
     #[arg(long)]
@@ -46,7 +46,7 @@ pub struct GithubArgs {
 
 /// What to migrate besides the git data. Forgejo mirrors cannot carry issues, labels, pull
 /// requests, releases or milestones, so only wiki and LFS are available.
-#[derive(Args, Debug, Clone, Copy)]
+#[derive(Args, Clone, Copy)]
 pub struct MirrorArgs {
     /// if set then forgejo will also migrate the L(arge) F(ile) S(torage) of the repositories
     #[arg(long)]
@@ -57,7 +57,7 @@ pub struct MirrorArgs {
     pub migrate_wiki: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct MirrorOrg {
     #[command(flatten)]
     pub forgejo: ForgejoArgs,
@@ -68,7 +68,7 @@ pub struct MirrorOrg {
     #[command(flatten)]
     pub mirror: MirrorArgs,
 
-    /// the visibility of the created forgejo organisation
+    /// the visibility of the forgejo organisation if it gets created; private also makes every mirrored repository private
     #[arg(short, long, default_value = "public")]
     pub visibility: Visibility,
 
@@ -84,7 +84,7 @@ pub struct MirrorOrg {
     pub github_organisation_name: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct MirrorUser {
     #[command(flatten)]
     pub forgejo: ForgejoArgs,
@@ -95,7 +95,7 @@ pub struct MirrorUser {
     #[command(flatten)]
     pub mirror: MirrorArgs,
 
-    /// the visibility of the created forgejo organisation
+    /// the visibility of the forgejo organisation if it gets created; private also makes every mirrored repository private
     #[arg(short, long, default_value = "public")]
     pub visibility: Visibility,
 
@@ -107,7 +107,7 @@ pub struct MirrorUser {
     pub github_user_name: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct MirrorRepo {
     #[command(flatten)]
     pub forgejo: ForgejoArgs,
@@ -134,7 +134,7 @@ pub struct MirrorRepo {
     pub github_repository_url: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct DeleteOrg {
     #[command(flatten)]
     pub forgejo: ForgejoArgs,

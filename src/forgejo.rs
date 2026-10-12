@@ -24,7 +24,7 @@ pub enum Visibility {
     Private,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct CreateOrganisation {
     pub username: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -35,9 +35,8 @@ pub struct CreateOrganisation {
     pub visibility: Visibility,
 }
 
-/// Body of `POST /repos/migrate`. For mirrors Forgejo ignores issues, labels, pull requests,
-/// releases and milestones, so only wiki and LFS are exposed.
-#[derive(Debug, Serialize)]
+/// Body of `POST /repos/migrate`; see [`crate::cli::MirrorArgs`] for why only wiki and LFS are exposed.
+#[derive(Serialize)]
 pub struct MigrateRepository {
     pub auth_token: String,
     pub clone_addr: String,
@@ -61,7 +60,7 @@ struct Avatar {
     image: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct VersionResponse {
     version: String,
 }
@@ -118,15 +117,15 @@ pub struct ForgejoApi {
 }
 
 impl ForgejoApi {
+    /// Builds a client without version detection; every endpoint is then assumed to exist.
     pub fn new(url: &str, token: String) -> Result<Self> {
         let mut base = Url::parse(url).with_context(|| format!("invalid forgejo url: {url}"))?;
-        base.path_segments_mut()
-            .map_err(|()| anyhow!("invalid forgejo url: {url}"))?
-            .pop_if_empty()
-            .extend(["api", "v1"]);
 
-        if base.scheme() == "http" {
-            warn!("Forgejo url uses plain http, tokens are sent unencrypted");
+        if !base.path().trim_end_matches('/').ends_with("/api/v1") {
+            base.path_segments_mut()
+                .map_err(|()| anyhow!("invalid forgejo url: {url}"))?
+                .pop_if_empty()
+                .extend(["api", "v1"]);
         }
 
         Ok(Self {
@@ -167,9 +166,7 @@ impl ForgejoApi {
     }
 
     pub async fn create_organisation(&self, org: &CreateOrganisation) -> Result<()> {
-        self.rest.post(&["orgs"], org).await?;
-
-        Ok(())
+        self.rest.post(&["orgs"], org).await
     }
 
     /// Needs Gitea API 1.21 or newer; check [`ForgejoApi::supports_organisation_avatar`] first.
@@ -177,9 +174,8 @@ impl ForgejoApi {
         let body = Avatar {
             image: STANDARD.encode(image),
         };
-        self.rest.post(&["orgs", name, "avatar"], &body).await?;
 
-        Ok(())
+        self.rest.post(&["orgs", name, "avatar"], &body).await
     }
 
     pub async fn delete_organisation(&self, name: &str) -> Result<()> {
@@ -197,14 +193,12 @@ impl ForgejoApi {
     }
 
     pub async fn migrate_repository(&self, request: &MigrateRepository) -> Result<()> {
-        self.rest
-            .send(
-                self.rest
-                    .request(Method::POST, &["repos", "migrate"])
-                    .json(request)
-                    .timeout(MIGRATE_TIMEOUT),
-            )
-            .await?;
+        let request = self
+            .rest
+            .request(Method::POST, &["repos", "migrate"])?
+            .json(request)
+            .timeout(MIGRATE_TIMEOUT);
+        self.rest.send(request).await?;
 
         Ok(())
     }

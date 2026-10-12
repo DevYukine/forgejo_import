@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use log::{error, info, warn};
+use reqwest::Url;
 
 use crate::cli::{
     DeleteOrg, ForgejoArgs, GithubArgs, MirrorArgs, MirrorOrg, MirrorRepo, MirrorUser,
@@ -14,8 +15,9 @@ pub async fn mirror_organisation(cmd: MirrorOrg, config: &Config) -> Result<()> 
     let mirror = merge_mirror_args(cmd.mirror, config);
 
     let org = github.organisation(&cmd.github_organisation_name).await?;
+    let repos = github.organisation_repositories(&org.login).await?;
     let owner = cmd.org_username.unwrap_or_else(|| org.login.clone());
-    let description = match &org.description {
+    let description = match org.description.filter(|text| !text.is_empty()) {
         Some(text) => format!("Mirror of {}\n\n{text}", org.html_url),
         None => format!("Mirror of {}", org.html_url),
     };
@@ -34,10 +36,17 @@ pub async fn mirror_organisation(cmd: MirrorOrg, config: &Config) -> Result<()> 
     )
     .await?;
 
-    let repos = github.organisation_repositories(&org.login).await?;
     let force_private = cmd.visibility == Visibility::Private;
 
-    mirror_repositories(&forgejo, &github, repos, &owner, force_private, mirror).await
+    mirror_repositories(
+        &forgejo,
+        github.token(),
+        repos,
+        &owner,
+        force_private,
+        mirror,
+    )
+    .await
 }
 
 pub async fn mirror_user(cmd: MirrorUser, config: &Config) -> Result<()> {
@@ -46,6 +55,7 @@ pub async fn mirror_user(cmd: MirrorUser, config: &Config) -> Result<()> {
     let mirror = merge_mirror_args(cmd.mirror, config);
 
     let user = github.user(&cmd.github_user_name).await?;
+    let repos = github.user_repositories(&user.login).await?;
     let owner = cmd
         .output_organisation_name
         .unwrap_or_else(|| user.login.clone());
@@ -64,18 +74,25 @@ pub async fn mirror_user(cmd: MirrorUser, config: &Config) -> Result<()> {
     )
     .await?;
 
-    let repos = github.user_repositories(&user.login).await?;
     let force_private = cmd.visibility == Visibility::Private;
 
-    mirror_repositories(&forgejo, &github, repos, &owner, force_private, mirror).await
+    mirror_repositories(
+        &forgejo,
+        github.token(),
+        repos,
+        &owner,
+        force_private,
+        mirror,
+    )
+    .await
 }
 
 pub async fn mirror_repository(cmd: MirrorRepo, config: &Config) -> Result<()> {
+    let (owner, name) = parse_repository_url(&cmd.github_repository_url)?;
     let github = github_api(cmd.github, config)?;
     let forgejo = forgejo_api(cmd.forgejo, config).await?;
     let mirror = merge_mirror_args(cmd.mirror, config);
 
-    let (owner, name) = parse_github_repository(&cmd.github_repository_url)?;
     let repo = github.repository(owner, name).await?;
     let target_name = cmd
         .output_repository_name
@@ -119,15 +136,27 @@ pub async fn delete_organisation(cmd: DeleteOrg, config: &Config) -> Result<()> 
 }
 
 fn confirm(prompt: &str) -> Result<bool> {
-    use std::io::{BufRead, Write};
+    use std::io::{BufRead, IsTerminal, Write};
 
-    print!("{prompt}");
-    std::io::stdout().flush()?;
+    let stdin = std::io::stdin();
+
+    if !stdin.is_terminal() {
+        bail!("stdin is not a terminal, pass --yes to confirm");
+    }
+
+    eprint!("{prompt}");
+    std::io::stderr().flush()?;
 
     let mut answer = String::new();
-    std::io::stdin().lock().read_line(&mut answer)?;
+    stdin.lock().read_line(&mut answer)?;
 
-    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
+    Ok(is_affirmative(&answer))
+}
+
+fn is_affirmative(answer: &str) -> bool {
+    let answer = answer.trim();
+
+    answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
 fn github_api(args: GithubArgs, config: &Config) -> Result<GithubApi> {
@@ -194,16 +223,16 @@ async fn ensure_organisation(
     info!("Created organisation {username}");
 
     // The organisation is usable without an avatar, and a rerun would skip this block anyway.
-    if !forgejo.supports_organisation_avatar() {
-        warn!(
-            "Forgejo {} cannot set organisation avatars through the API (needs Gitea API 1.21), skipping",
-            forgejo.version()
-        );
-    } else {
+    if forgejo.supports_organisation_avatar() {
         match set_avatar(forgejo, github, username, org.avatar_url).await {
             Ok(()) => info!("Set avatar of organisation {username}"),
             Err(err) => warn!("Could not set avatar of organisation {username}: {err:#}"),
         }
+    } else {
+        warn!(
+            "Forgejo {} cannot set organisation avatars through the API (needs Gitea API 1.21), skipping",
+            forgejo.version()
+        );
     }
 
     Ok(())
@@ -220,20 +249,30 @@ async fn set_avatar(
     forgejo.set_organisation_avatar(username, image).await
 }
 
+/// GitHub accepts any text as a website, Forgejo wants a URL; prefix a bare host and drop the rest.
 fn normalise_website(website: String) -> Option<String> {
+    let website = website.trim();
+
     if website.is_empty() {
-        None
-    } else if website.starts_with("http://") || website.starts_with("https://") {
-        Some(website)
-    } else {
-        Some(format!("https://{website}"))
+        return None;
     }
+
+    let url = if website.starts_with("http://") || website.starts_with("https://") {
+        website.to_string()
+    } else {
+        format!("https://{website}")
+    };
+
+    Url::parse(&url)
+        .ok()
+        .filter(|parsed| parsed.host_str().is_some())
+        .map(|_| url)
 }
 
 /// Mirrors every repository, continuing past failures so one bad repository does not stop the batch.
 async fn mirror_repositories(
     forgejo: &ForgejoApi,
-    github: &GithubApi,
+    github_token: &str,
     repos: Vec<github::Repository>,
     owner: &str,
     force_private: bool,
@@ -249,7 +288,7 @@ async fn mirror_repositories(
             repo.name.clone(),
             force_private,
             mirror,
-            github.token(),
+            github_token,
         );
 
         if let Err(err) = mirror_one(forgejo, &request).await {
@@ -276,7 +315,7 @@ fn migrate_request(
     forgejo::MigrateRepository {
         auth_token: github_token.to_string(),
         clone_addr: repo.clone_url.clone(),
-        description: match &repo.description {
+        description: match repo.description.as_deref().filter(|text| !text.is_empty()) {
             Some(text) => format!("[MIRROR] {text}"),
             None => "[MIRROR]".to_string(),
         },
@@ -307,46 +346,54 @@ async fn mirror_one(forgejo: &ForgejoApi, request: &forgejo::MigrateRepository) 
     Ok(())
 }
 
-/// Accepts `https://github.com/owner/repo[.git]`, `http://…`, `git@github.com:owner/repo[.git]`
-/// and `ssh://git@github.com/owner/repo[.git]`; returns `(owner, repo)`.
-pub fn parse_github_repository(url: &str) -> Result<(&str, &str)> {
-    const PREFIXES: [&str; 4] = [
-        "https://github.com/",
-        "http://github.com/",
-        "git@github.com:",
-        "ssh://git@github.com/",
-    ];
+/// Extracts `(owner, repo)` from a repository URL as copied from a browser or a clone dialog:
+/// `https://host/owner/repo[.git][/tree/main][?…][#…]`, `git@host:owner/repo[.git]` or
+/// `ssh://git@host/owner/repo`. The host is not checked; the configured API decides what exists.
+fn parse_repository_url(url: &str) -> Result<(&str, &str)> {
+    let without_query = url.split(['?', '#']).next().unwrap_or_default();
+    let path = match without_query.split_once("://") {
+        Some((_, rest)) => rest.split_once('/').map(|(_, path)| path),
+        None => without_query.split_once(':').map(|(_, path)| path),
+    }
+    .with_context(|| format!("unsupported repository url: {url}"))?;
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
 
-    let path = PREFIXES
-        .iter()
-        .find_map(|prefix| url.strip_prefix(prefix))
-        .with_context(|| format!("unsupported github repository url: {url}"))?;
-    let path = path.trim_end_matches('/').trim_end_matches(".git");
-
-    match path.split_once('/') {
-        Some((owner, repo)) if !owner.is_empty() && !repo.is_empty() && !repo.contains('/') => {
-            Ok((owner, repo))
-        }
-        _ => bail!("github repository url must be owner/repository, got: {url}"),
+    match (segments.next(), segments.next()) {
+        (Some(owner), Some(repo)) => Ok((owner, repo.trim_end_matches(".git"))),
+        _ => bail!("repository url must contain owner/repository: {url}"),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{normalise_website, parse_github_repository};
+    use super::{is_affirmative, normalise_website, parse_repository_url};
 
     #[test]
-    fn parses_supported_url_forms() {
+    fn only_y_and_yes_confirm() {
+        for answer in ["y\n", "Y", " yes ", "YES\r\n", "Yes"] {
+            assert!(is_affirmative(answer), "{answer:?}");
+        }
+        for answer in ["", "\n", "n", "no", "yup", "y e s"] {
+            assert!(!is_affirmative(answer), "{answer:?}");
+        }
+    }
+
+    #[test]
+    fn parses_clone_and_browser_url_forms() {
         for url in [
             "https://github.com/octo/repo",
             "https://github.com/octo/repo.git",
             "https://github.com/octo/repo/",
-            "http://github.com/octo/repo",
+            "http://github.com:8080/octo/repo",
+            "https://www.github.com/octo/repo",
+            "https://github.com/octo/repo/tree/main/src",
+            "https://github.com/octo/repo?tab=readme#section",
             "git@github.com:octo/repo.git",
             "ssh://git@github.com/octo/repo",
+            "https://ghe.example.com/octo/repo",
         ] {
             assert_eq!(
-                parse_github_repository(url).unwrap(),
+                parse_repository_url(url).unwrap(),
                 ("octo", "repo"),
                 "{url}"
             );
@@ -354,28 +401,30 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_urls() {
+    fn rejects_urls_without_owner_and_repository() {
         for url in [
             "https://github.com/octo",
-            "https://github.com/octo/repo/tree/main",
-            "https://gitlab.com/octo/repo",
-            "octo/repo",
             "https://github.com//repo",
+            "https://github.com",
+            "octo/repo",
+            "",
         ] {
-            assert!(parse_github_repository(url).is_err(), "{url}");
+            assert!(parse_repository_url(url).is_err(), "{url}");
         }
     }
 
     #[test]
-    fn website_gets_a_scheme_only_when_missing() {
+    fn websites_become_urls_or_are_dropped() {
         assert_eq!(normalise_website(String::new()), None);
+        assert_eq!(normalise_website("  ".into()), None);
+        assert_eq!(normalise_website("not a url".into()), None);
         assert_eq!(
             normalise_website("example.org".into()).as_deref(),
             Some("https://example.org")
         );
         assert_eq!(
-            normalise_website("http://example.org".into()).as_deref(),
-            Some("http://example.org")
+            normalise_website(" http://example.org/x ".into()).as_deref(),
+            Some("http://example.org/x")
         );
     }
 }
