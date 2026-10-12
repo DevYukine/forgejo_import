@@ -1,7 +1,5 @@
-use std::sync::LazyLock;
-
+use anyhow::{Context, bail};
 use log::{debug, info, warn};
-use regex::Regex;
 
 use crate::cli::{
     DeleteForgejoOrganisationCommand, MirrorOrganisationCommand, MirrorRepositoryCommand,
@@ -194,60 +192,43 @@ pub async fn mirror_repository(cmd: MirrorRepositoryCommand) -> anyhow::Result<(
     let mut forgejo = ForgejoApi::new(cmd.forgejo_url.unwrap(), cmd.forgejo_token.unwrap())?;
     let mut github = GithubApi::new(cmd.github_token.clone().unwrap())?;
 
-    static REPO_NAME_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?:git@|https://)github.com[:/](?<ownerRepoName>.*)").unwrap()
-    });
+    let (owner, repo_name) = parse_github_repository(&cmd.github_repository_url)?;
 
-    let forgejo_repo_owner = cmd.output_owner;
+    debug!("Fetching repository: {}/{}", owner, repo_name);
 
-    if let Some(captures) = REPO_NAME_REGEX.captures(&cmd.github_repository_url) {
-        debug!("Matched repository name: {:?}", captures);
+    let repo = github.get_repository(owner, repo_name).await?;
+    let forgejo_repo_name = cmd.output_repository_name.unwrap_or(repo.name.clone());
 
-        let named_group = captures.name("ownerRepoName");
+    let base_repository_request = ForgejoMigrateRepositoryRequest {
+        auth_token: cmd.github_token.clone().unwrap(),
+        clone_addr: repo.clone_url.clone(),
+        description: Some(format!(
+            "[MIRROR] {}",
+            repo.description.clone().unwrap_or("".to_string())
+        )),
+        issues: cmd.migrate_issues,
+        labels: cmd.migrate_labels,
+        lfs: cmd.migrate_lfs,
+        lfs_endpoint: None,
+        milestones: cmd.migrate_milestones,
+        mirror: true,
+        mirror_interval: None,
+        private: cmd.private || repo.private,
+        pull_requests: cmd.migrate_pull_requests,
+        releases: cmd.migrate_releases,
+        repo_name: forgejo_repo_name,
+        repo_owner: cmd.output_owner.clone(),
+        service: ForgejoMigrateRepoService::Github,
+        wiki: cmd.migrate_wiki,
+    };
 
-        if let Some(matched_group) = named_group {
-            let owner_repo_name = matched_group.as_str();
-            let owner_repo_name_parts = owner_repo_name.split("/").collect::<Vec<&str>>();
-
-            let owner = owner_repo_name_parts[0];
-            let repo_name = owner_repo_name_parts[1];
-
-            debug!("Fetching repository: {}/{}", owner, repo_name);
-
-            let repo = github.get_repository(owner, repo_name).await?;
-
-            let base_repository_request = ForgejoMigrateRepositoryRequest {
-                auth_token: cmd.github_token.clone().unwrap(),
-                clone_addr: repo.clone_url.clone(),
-                description: Some(format!(
-                    "[MIRROR] {}",
-                    repo.description.clone().unwrap_or("".to_string())
-                )),
-                issues: cmd.migrate_issues,
-                labels: cmd.migrate_labels,
-                lfs: cmd.migrate_lfs,
-                lfs_endpoint: None,
-                milestones: cmd.migrate_milestones,
-                mirror: true,
-                mirror_interval: None,
-                private: cmd.private || repo.private,
-                pull_requests: cmd.migrate_pull_requests,
-                releases: cmd.migrate_releases,
-                repo_name: repo_name.to_string(),
-                repo_owner: forgejo_repo_owner.clone(),
-                service: ForgejoMigrateRepoService::Github,
-                wiki: cmd.migrate_wiki,
-            };
-
-            create_migration_if_not_exist(
-                &mut forgejo,
-                &forgejo_repo_owner,
-                &base_repository_request,
-                repo,
-            )
-            .await?;
-        }
-    }
+    create_migration_if_not_exist(
+        &mut forgejo,
+        &cmd.output_owner,
+        &base_repository_request,
+        repo,
+    )
+    .await?;
 
     Ok(())
 }
@@ -305,22 +286,77 @@ async fn create_migration_if_not_exist(
     forgejo: &mut ForgejoApi,
     forgejo_owner: &str,
     request: &ForgejoMigrateRepositoryRequest,
-    repo: GithubRepository,
+    _repo: GithubRepository,
 ) -> anyhow::Result<()> {
-    let exists = forgejo.repository_exists(forgejo_owner, &repo.name).await?;
+    let repo_name = &request.repo_name;
+    let exists = forgejo.repository_exists(forgejo_owner, repo_name).await?;
 
     if exists {
-        warn!("Repository already exists: {}, skipping", &repo.name);
+        warn!("Repository already exists: {}, skipping", repo_name);
         return Ok(());
     }
 
-    let repo_name = repo.name;
-
-    debug!("Migrating repository: {}", &repo_name);
+    debug!("Migrating repository: {}", repo_name);
 
     forgejo.mirror_repository(request).await?;
 
-    info!("Repository mirrored: {}", &repo_name);
+    info!("Repository mirrored: {}", repo_name);
 
     Ok(())
+}
+
+/// Accepts `https://github.com/owner/repo[.git]`, `http://…`, `git@github.com:owner/repo[.git]`
+/// and `ssh://git@github.com/owner/repo[.git]`; returns `(owner, repo)`.
+pub fn parse_github_repository(url: &str) -> anyhow::Result<(&str, &str)> {
+    const PREFIXES: [&str; 4] = [
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+    ];
+
+    let path = PREFIXES
+        .iter()
+        .find_map(|prefix| url.strip_prefix(prefix))
+        .with_context(|| format!("unsupported github repository url: {url}"))?;
+    let path = path.trim_end_matches('/').trim_end_matches(".git");
+
+    match path.split_once('/') {
+        Some((owner, repo)) if !owner.is_empty() && !repo.is_empty() && !repo.contains('/') => {
+            Ok((owner, repo))
+        }
+        _ => bail!("github repository url must be owner/repository, got: {url}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_github_repository;
+
+    #[test]
+    fn parses_supported_url_forms() {
+        for url in [
+            "https://github.com/octo/repo",
+            "https://github.com/octo/repo.git",
+            "https://github.com/octo/repo/",
+            "http://github.com/octo/repo",
+            "git@github.com:octo/repo.git",
+            "ssh://git@github.com/octo/repo",
+        ] {
+            assert_eq!(parse_github_repository(url).unwrap(), ("octo", "repo"), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_urls() {
+        for url in [
+            "https://github.com/octo",
+            "https://github.com/octo/repo/tree/main",
+            "https://gitlab.com/octo/repo",
+            "octo/repo",
+            "https://github.com//repo",
+        ] {
+            assert!(parse_github_repository(url).is_err(), "{url}");
+        }
+    }
 }
